@@ -1766,14 +1766,18 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 		return
 	}
 
-	tokenPair, user, err := h.authService.RegisterOAuthEmailAccount(
-		c.Request.Context(),
-		email,
-		req.Password,
-		strings.TrimSpace(req.VerifyCode),
-		strings.TrimSpace(req.InvitationCode),
-		strings.TrimSpace(session.ProviderType),
-	)
+	var tokenPair *service.TokenPair
+	var user *service.User
+	if h.authService.NodeMode() {
+		user, err = h.authService.PrepareNodeOAuthEmailAccount(c.Request.Context(), service.PendingAuthIdentityKey{
+			ProviderType: session.ProviderType, ProviderKey: session.ProviderKey, ProviderSubject: session.ProviderSubject,
+		}, email, req.Password, strings.TrimSpace(req.VerifyCode), strings.TrimSpace(req.InvitationCode))
+	} else {
+		tokenPair, user, err = h.authService.RegisterOAuthEmailAccount(
+			c.Request.Context(), email, req.Password, strings.TrimSpace(req.VerifyCode),
+			strings.TrimSpace(req.InvitationCode), strings.TrimSpace(session.ProviderType),
+		)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrEmailExists) {
 			existingUser, lookupErr := findUserByNormalizedEmail(c.Request.Context(), client, email)
@@ -1890,6 +1894,14 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 	// createPendingOAuthAccount = 注册新账户，需要把钉钉昵称同步到 users.username 作为初始值
 	h.maybeSyncDingTalkAfterRegistration(c.Request.Context(), session, user.ID)
 	clearCookies()
+	if tokenPair == nil {
+		// The gate's separate SQL connection must see the committed identity.
+		tokenPair, err = h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	writeOAuthTokenPairResponse(c, tokenPair)
 }
 

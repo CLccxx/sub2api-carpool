@@ -18,6 +18,9 @@ func (s *AuthService) ApplyProviderDefaultSettingsOnFirstBind(
 	userID int64,
 	providerType string,
 ) error {
+	if s.NodeMode() {
+		return nil
+	}
 	if s == nil || s.entClient == nil || s.settingService == nil || userID <= 0 {
 		return nil
 	}

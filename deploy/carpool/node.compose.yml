@@ -1,0 +1,27 @@
+# Overlay for ../docker-compose.local.yml. One B database belongs to one car.
+services:
+  sub2api:
+    image: ${CARPOOL_IMAGE:?Use the verified customized image ID or digest}
+    pull_policy: never
+    environment:
+      RUN_MODE: standard
+      SERVER_FRONTEND_URL: ${PUBLIC_URL:?Set this server HTTPS origin}
+      SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL: "false"
+      SERVER_TRUSTED_PROXIES: "${SERVER_TRUSTED_PROXIES:-}"
+      JWT_SECRET: ${JWT_SECRET:?Set a persistent independent JWT secret}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?Set an independent TOTP encryption key}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set the initial administrator email}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set the initial administrator password}
+      OIDC_CONNECT_ENABLED: "false"
+      CARPOOL_MAIN_ENABLED: "false"
+      CARPOOL_CONTROL_ENABLED: "false"
+      CARPOOL_NODE_ENABLED: "true"
+      CARPOOL_NODE_AUTHORIZATION_MODE: managed
+      CARPOOL_NODE_MAIN_INSTANCE_ID: ${CARPOOL_NODE_MAIN_INSTANCE_ID:?Copy the A instance UUID}
+      CARPOOL_NODE_NODE_ID: ${CARPOOL_NODE_NODE_ID:?Copy this registered node UUID}
+      CARPOOL_NODE_CAR_ID: ${CARPOOL_NODE_CAR_ID:?Copy this car UUID}
+      CARPOOL_NODE_GROUP_ID: "0"
+  postgres:
+    image: postgres:18.1-alpine3.23
+  redis:
+    image: redis:8.4-alpine

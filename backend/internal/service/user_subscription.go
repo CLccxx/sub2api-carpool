@@ -20,6 +20,8 @@ type UserSubscription struct {
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
+	// Runtime policy for a managed B group, resolved from its account alignment.
+	AccountAlignedWeekly bool `json:"-"`
 
 	DailyUsageUSD   float64
 	WeeklyUsageUSD  float64
@@ -162,6 +164,9 @@ func (s *UserSubscription) automaticWindowStartAt(previous *time.Time, period ti
 	}
 
 	anchor := s.windowResetAnchor(*previous)
+	if period == 7*24*time.Hour && s.AccountAlignedWeekly {
+		anchor = *previous
+	}
 	next := anchor.Add(period)
 	if now.Before(next) || !next.Before(s.ExpiresAt) {
 		return time.Time{}, false
@@ -192,7 +197,11 @@ func (s *UserSubscription) WeeklyResetTime() *time.Time {
 	if s.WeeklyWindowStart == nil {
 		return nil
 	}
-	t := s.windowResetAnchor(*s.WeeklyWindowStart).Add(7 * 24 * time.Hour)
+	anchor := s.windowResetAnchor(*s.WeeklyWindowStart)
+	if s.AccountAlignedWeekly {
+		anchor = *s.WeeklyWindowStart
+	}
+	t := anchor.Add(7 * 24 * time.Hour)
 	return &t
 }
 

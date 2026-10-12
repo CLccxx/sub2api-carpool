@@ -378,6 +378,10 @@ func (h *AuthHandler) OIDCOAuthCallback(c *gin.Context) {
 		ProviderKey:     issuer,
 		ProviderSubject: subject,
 	}
+	if err := h.authService.CheckNodeIdentity(c.Request.Context(), "oidc", issuer, subject); err != nil {
+		redirectOAuthError(c, frontendCallback, "node_access_denied", infraerrors.Reason(err), "")
+		return
+	}
 	upstreamClaims := map[string]any{
 		"email":             email,
 		"username":          username,
@@ -721,7 +725,11 @@ func (h *AuthHandler) CompleteOIDCOAuthRegistration(c *gin.Context) {
 
 func (h *AuthHandler) getOIDCOAuthConfig(ctx context.Context) (config.OIDCConnectConfig, error) {
 	if h != nil && h.settingSvc != nil {
-		return h.settingSvc.GetOIDCConnectOAuthConfig(ctx)
+		cfg, err := h.settingSvc.GetOIDCConnectOAuthConfig(ctx)
+		if err == nil && h.cfg != nil && h.cfg.CarpoolNode.Enabled && (!cfg.UsePKCE || !cfg.ValidateIDToken || cfg.IssuerURL != h.cfg.CarpoolNode.Issuer) {
+			return config.OIDCConnectConfig{}, infraerrors.ServiceUnavailable("NODE_OIDC_CONFIG_INVALID", "node requires strict OIDC with its configured issuer")
+		}
+		return cfg, err
 	}
 	if h == nil || h.cfg == nil {
 		return config.OIDCConnectConfig{}, infraerrors.ServiceUnavailable("CONFIG_NOT_READY", "config not loaded")
@@ -994,6 +1002,8 @@ func oidcParseAndValidateIDToken(ctx context.Context, cfg config.OIDCConnectConf
 		jwt.WithAudience(cfg.ClientID),
 		jwt.WithIssuer(cfg.IssuerURL),
 		jwt.WithLeeway(leeway),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
 	)
 	if err != nil {
 		return nil, err
@@ -1003,6 +1013,12 @@ func oidcParseAndValidateIDToken(ctx context.Context, cfg config.OIDCConnectConf
 	}
 	if strings.TrimSpace(claims.Subject) == "" {
 		return nil, errors.New("id_token missing sub")
+	}
+	if claims.IssuedAt == nil {
+		return nil, errors.New("id_token missing iat")
+	}
+	if claims.Azp != "" && claims.Azp != cfg.ClientID {
+		return nil, errors.New("id_token azp mismatch")
 	}
 	if expectedNonce != "" && strings.TrimSpace(claims.Nonce) != strings.TrimSpace(expectedNonce) {
 		return nil, errors.New("id_token nonce mismatch")
@@ -1271,11 +1287,9 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 		AvatarURL:        pendingSessionStringValue(upstreamClaims, "suggested_avatar_url"),
 		UpstreamMetadata: upstreamMetadata,
 	}
-	tokenPair, _, err := h.authService.LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
+	user, err := h.authService.PrepareVerifiedEmailOAuth(
 		ctx,
 		input,
-		"",
-		"",
 		readOAuthPromoCode(c),
 	)
 	if err != nil {
@@ -1283,14 +1297,16 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 		return false
 	}
 
-	fragment := url.Values{}
-	fragment.Set("access_token", tokenPair.AccessToken)
-	fragment.Set("refresh_token", tokenPair.RefreshToken)
-	fragment.Set("expires_in", fmt.Sprintf("%d", tokenPair.ExpiresIn))
-	fragment.Set("token_type", "Bearer")
-	fragment.Set("redirect", redirectTo)
-	clearOAuthPendingSessionCookie(c, isRequestHTTPS(c))
-	clearOAuthPendingBrowserCookie(c, isRequestHTTPS(c))
-	redirectWithFragment(c, frontendCallback, fragment)
+	browserSessionKey, _ := readOAuthPendingBrowserCookie(c)
+	if err := h.createOAuthPendingSession(c, oauthPendingSessionPayload{
+		Intent: oauthIntentLogin, Identity: identity, TargetUserID: &user.ID,
+		ResolvedEmail: user.Email, RedirectTo: redirectTo, BrowserSessionKey: browserSessionKey,
+		UpstreamIdentityClaims: upstreamMetadata,
+		CompletionResponse:     map[string]any{"redirect": redirectTo},
+	}); err != nil {
+		redirectOAuthError(c, frontendCallback, "session_error", "failed to continue oauth login", "")
+		return true
+	}
+	redirectToFrontendCallback(c, frontendCallback)
 	return true
 }

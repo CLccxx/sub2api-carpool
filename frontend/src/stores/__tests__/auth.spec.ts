@@ -55,6 +55,7 @@ describe('useAuthStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    sessionStorage.clear()
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -136,6 +137,20 @@ describe('useAuthStore', () => {
   // --- logout ---
 
   describe('logout', () => {
+    it('clears node key recovery metadata even when no carpool component is mounted', async () => {
+      sessionStorage.setItem('carpool:node-key:2:car-1', 'metadata')
+      mockLogout.mockResolvedValue(undefined)
+      await useAuthStore().logout()
+      expect(sessionStorage.getItem('carpool:node-key:2:car-1')).toBeNull()
+    })
+    it('clears private manual command recovery records without removing unrelated session state', async () => {
+      sessionStorage.setItem('carpool:manual:2:enrollment', JSON.stringify({ note: 'private receipt note' }))
+      sessionStorage.setItem('unrelated-session', 'keep')
+      mockLogout.mockResolvedValue(undefined)
+      await useAuthStore().logout()
+      expect(sessionStorage.getItem('carpool:manual:2:enrollment')).toBeNull()
+      expect(sessionStorage.getItem('unrelated-session')).toBe('keep')
+    })
     it('注销后清除所有状态和 localStorage', async () => {
       mockLogin.mockResolvedValue(fakeAuthResponse)
       mockLogout.mockResolvedValue(undefined)

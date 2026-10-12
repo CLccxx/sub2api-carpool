@@ -1,0 +1,25 @@
+# Overlay for ../docker-compose.local.yml. A and B run on separate servers.
+services:
+  sub2api:
+    image: ${CARPOOL_IMAGE:?Use the verified customized image ID or digest}
+    pull_policy: never
+    environment:
+      RUN_MODE: standard
+      SERVER_FRONTEND_URL: ${PUBLIC_URL:?Set this server HTTPS origin}
+      SECURITY_TRUST_FORWARDED_IP_FOR_API_KEY_ACL: "false"
+      SERVER_TRUSTED_PROXIES: "${SERVER_TRUSTED_PROXIES:-}"
+      JWT_SECRET: ${JWT_SECRET:?Set a persistent independent JWT secret}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?Set an independent TOTP encryption key}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set the initial administrator email}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set the initial administrator password}
+      CARPOOL_MAIN_ENABLED: "true"
+      CARPOOL_MAIN_TEST_ORDERS_ENABLED: "false"
+      CARPOOL_MAIN_MANUAL_ENROLLMENT_ENABLED: "true"
+      CARPOOL_CONTROL_ENABLED: "true"
+      CARPOOL_CONTROL_ENCRYPTION_KEY: ${CARPOOL_CONTROL_ENCRYPTION_KEY:?Set a persistent independent base64 32-byte key}
+      CARPOOL_CONTROL_ALLOWED_ORIGINS: ${CARPOOL_CONTROL_ALLOWED_ORIGINS:?List allowed B HTTPS origins}
+      CARPOOL_NODE_ENABLED: "false"
+  postgres:
+    image: postgres:18.1-alpine3.23
+  redis:
+    image: redis:8.4-alpine

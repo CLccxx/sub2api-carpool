@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/carpool"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -66,6 +67,9 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
 type Config struct {
+	CarpoolNode             carpool.Config                `mapstructure:"carpool_node"`
+	CarpoolMain             carpool.MainConfig            `mapstructure:"carpool_main"`
+	CarpoolControl          carpool.ControlConfig         `mapstructure:"carpool_control"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -1991,6 +1995,19 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	viper.SetDefault("carpool_node.enabled", false)
+	viper.SetDefault("carpool_main.enabled", false)
+	viper.SetDefault("carpool_main.test_orders_enabled", false)
+	viper.SetDefault("carpool_main.manual_enrollment_enabled", false)
+	viper.SetDefault("carpool_node.node_id", "")
+	viper.SetDefault("carpool_node.car_id", "")
+	viper.SetDefault("carpool_node.issuer", "")
+	viper.SetDefault("carpool_node.authorization_mode", "oidc")
+	viper.SetDefault("carpool_node.main_instance_id", "")
+	viper.SetDefault("carpool_node.group_id", 0)
+	viper.SetDefault("carpool_control.enabled", false)
+	viper.SetDefault("carpool_control.encryption_key", "")
+	viper.SetDefault("carpool_control.allowed_origins", []string{})
 	viper.SetDefault("run_mode", RunModeStandard)
 
 	// Server
@@ -2651,6 +2668,27 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.CarpoolMain.Validate(c.CarpoolNode.Enabled); err != nil {
+		return err
+	}
+	if err := c.CarpoolNode.Validate(); err != nil {
+		return err
+	}
+	if err := c.CarpoolControl.Validate(c.CarpoolMain.Enabled, c.CarpoolNode.Enabled); err != nil {
+		return err
+	}
+	if err := c.CarpoolControl.ValidateSecrets(c.JWT.Secret, c.Totp.EncryptionKey); err != nil {
+		return err
+	}
+	if c.CarpoolNode.Enabled && c.RunMode == RunModeSimple {
+		return fmt.Errorf("carpool_node requires standard mode")
+	}
+	if c.CarpoolNode.Managed() && c.OIDC.Enabled {
+		return fmt.Errorf("managed carpool_node excludes member OIDC login")
+	}
+	if c.CarpoolNode.Enabled && !c.CarpoolNode.Managed() && (!c.OIDC.Enabled || !c.OIDC.UsePKCE || !c.OIDC.ValidateIDToken || c.CarpoolNode.Issuer != c.OIDC.IssuerURL) {
+		return fmt.Errorf("carpool_node requires standard mode and strict OIDC with matching issuer")
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

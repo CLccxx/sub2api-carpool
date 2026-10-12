@@ -26,7 +26,7 @@ type EmailOAuthIdentityInput struct {
 }
 
 func (s *AuthService) LoginOrRegisterVerifiedEmailOAuth(ctx context.Context, input EmailOAuthIdentityInput) (*TokenPair, *User, error) {
-	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, "", "", "")
+	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, "", "", "", true)
 }
 
 func (s *AuthService) LoginOrRegisterVerifiedEmailOAuthWithInvitation(
@@ -35,7 +35,7 @@ func (s *AuthService) LoginOrRegisterVerifiedEmailOAuthWithInvitation(
 	invitationCode string,
 	affiliateCode string,
 ) (*TokenPair, *User, error) {
-	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, invitationCode, affiliateCode, "")
+	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, invitationCode, affiliateCode, "", true)
 }
 
 func (s *AuthService) LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
@@ -45,7 +45,14 @@ func (s *AuthService) LoginOrRegisterVerifiedEmailOAuthWithSignupCodes(
 	affiliateCode string,
 	promoCode string,
 ) (*TokenPair, *User, error) {
-	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, invitationCode, affiliateCode, promoCode)
+	return s.loginOrRegisterVerifiedEmailOAuth(ctx, input, invitationCode, affiliateCode, promoCode, true)
+}
+
+// PrepareVerifiedEmailOAuth creates/binds the verified identity without issuing
+// credentials. The browser-bound pending exchange completes session issuance.
+func (s *AuthService) PrepareVerifiedEmailOAuth(ctx context.Context, input EmailOAuthIdentityInput, promoCode string) (*User, error) {
+	_, user, err := s.loginOrRegisterVerifiedEmailOAuth(ctx, input, "", "", promoCode, false)
+	return user, err
 }
 
 func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
@@ -54,6 +61,7 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 	invitationCode string,
 	affiliateCode string,
 	promoCode string,
+	issueTokens bool,
 ) (*TokenPair, *User, error) {
 	if s == nil || s.userRepo == nil || s.entClient == nil {
 		return nil, nil, ErrServiceUnavailable
@@ -68,6 +76,9 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		providerKey = providerType
 	}
 	providerSubject := strings.TrimSpace(input.ProviderSubject)
+	if err := s.CheckNodeIdentity(ctx, providerType, providerKey, providerSubject); err != nil {
+		return nil, nil, err
+	}
 	if providerSubject == "" {
 		return nil, nil, infraerrors.BadRequest("OAUTH_SUBJECT_MISSING", "oauth subject is missing")
 	}
@@ -146,6 +157,9 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		user = s.applyOAuthSignupPromoCode(ctx, user, promoCode)
 	}
 	s.RecordSuccessfulLogin(ctx, user.ID)
+	if !issueTokens {
+		return nil, user, nil
+	}
 
 	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
 	if err != nil {

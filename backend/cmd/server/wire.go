@@ -28,7 +28,18 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
-	Cleanup       func()
+	Cleanup       applicationCleanup
+}
+
+type applicationCleanup func()
+
+func provideApplicationCleanup(cleanup func(), carpoolExpiry *service.CarpoolExpiryWorker, carpoolControl *service.CarpoolControlWorker, carpoolQuota *service.CarpoolQuotaWorker) applicationCleanup {
+	return func() {
+		carpoolQuota.Stop()
+		carpoolControl.Stop()
+		carpoolExpiry.Stop()
+		cleanup()
+	}
 }
 
 func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
@@ -56,6 +67,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 
 		// Cleanup function provider
 		provideCleanup,
+		provideApplicationCleanup,
 
 		// Application struct
 		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Cleanup"),

@@ -91,6 +91,13 @@ describe('API Client', () => {
       expect(config.params).toHaveProperty('timezone')
     })
 
+    it.each(['/carpool/cars/car-1/console', '/carpool/cars/car-1/keys', '/carpool/cars/car-1/usage', '/carpool/cars/car-1/usage/stats', '/admin/carpool/cars/car-1/sync', '/admin/carpool/cars/car-1/connection'])('keeps the strict UTC carpool query unchanged for %s', async url => {
+      const adapter = vi.fn().mockResolvedValue({ status: 200, data: { code: 0, data: {} }, headers: {}, config: {}, statusText: 'OK' })
+      apiClient.defaults.adapter = adapter
+      await apiClient.get(url, { params: { page: 1 } })
+      expect(adapter.mock.calls[0][0].params).toEqual({ page: 1 })
+    })
+
     it('POST 请求不附加 timezone 参数', async () => {
       const adapter = vi.fn().mockResolvedValue({
         status: 200,
@@ -311,6 +318,30 @@ describe('API Client', () => {
   // --- 401 Token 刷新 ---
 
   describe('401 Token 刷新', () => {
+    it.each(['missing', 'rejected'])('clears private manual recovery data when refresh is %s', async mode => {
+      window.history.replaceState({}, '', '/login')
+      localStorage.setItem('auth_token', 'expired-token')
+      const name = 'carpool:manual:7:enrollment'
+      sessionStorage.setItem(name, JSON.stringify({ note: 'private receipt note' }))
+      sessionStorage.setItem('carpool:node-key:7:car-1', 'metadata')
+      sessionStorage.setItem('unrelated-session', 'keep')
+      const { manualCommandMemory } = await import('@/utils/carpoolManualJournal')
+      manualCommandMemory.set(name, { action: 'withdraw', target: 'order', body: { reason: 'private', confirm: true }, actor: 7, key: 'key', uncertain: true })
+      if (mode === 'rejected') {
+        localStorage.setItem('refresh_token', 'rejected-token')
+        const refresh = await import('@/api/tokenRefresh')
+        vi.spyOn(refresh, 'refreshAuthTokens').mockRejectedValueOnce(Object.assign(new axios.AxiosError('Refresh rejected'), { response: { status: 401 } }))
+      }
+      apiClient.defaults.adapter = vi.fn().mockRejectedValueOnce({
+        response: { status: 401, data: { code: 'TOKEN_EXPIRED' } },
+        config: { url: '/test', headers: { Authorization: 'Bearer expired-token' } },
+      })
+      await expect(apiClient.get('/test')).rejects.toMatchObject({ status: 401 })
+      expect(sessionStorage.getItem(name)).toBeNull()
+      expect(sessionStorage.getItem('carpool:node-key:7:car-1')).toBeNull()
+      expect(manualCommandMemory.size).toBe(0)
+      expect(sessionStorage.getItem('unrelated-session')).toBe('keep')
+    })
     it('无 refresh_token 时 401 清除 localStorage', async () => {
       localStorage.setItem('auth_token', 'expired-token')
       // 不设置 refresh_token
@@ -394,6 +425,7 @@ describe('API Client', () => {
     })
 
     it.each([429, 500, 503, 0])('刷新暂时失败（%s）时保留会话并返回实际状态', async (status) => {
+      sessionStorage.setItem('carpool:manual:7:enrollment', 'recoverable request')
       localStorage.setItem('auth_token', 'expired-token')
       localStorage.setItem('refresh_token', 'refresh-token')
       localStorage.setItem('auth_user', JSON.stringify({ id: 7 }))
@@ -423,6 +455,7 @@ describe('API Client', () => {
       expect(localStorage.getItem('auth_user')).toBe(JSON.stringify({ id: 7 }))
       expect(localStorage.getItem('token_expires_at')).toBe('123')
       expect(sessionStorage.getItem('auth_expired')).toBeNull()
+      expect(sessionStorage.getItem('carpool:manual:7:enrollment')).toBe('recoverable request')
       expect(window.location.pathname).toBe('/')
     })
 

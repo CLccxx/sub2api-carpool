@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	apperrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -158,6 +159,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
+			return
+		}
+		if err := apiKeyService.CheckNodeUser(c.Request.Context(), apiKey.User.ID); err != nil {
+			AbortWithError(c, apperrors.Code(err), apperrors.Reason(err), apperrors.Message(err))
 			return
 		}
 		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {

@@ -94,6 +94,8 @@ function defineFlag<K extends keyof PublicSettings>(
  * public-settings-driven switch; see the "Adding a new flag" checklist above.
  */
 export const FeatureFlags = {
+  carpool: defineFlag({ key: 'carpool_main_enabled', mode: 'opt-in', label: 'Carpool' }),
+  carpoolControl: defineFlag({ key: 'carpool_control_enabled', mode: 'opt-in', label: 'Carpool node controls' }),
   channelMonitor: defineFlag({
     key: 'channel_monitor_enabled',
     mode: 'opt-out',

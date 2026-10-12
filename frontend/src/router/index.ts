@@ -188,6 +188,21 @@ const routes: RouteRecordRaw[] = [
 
   // ==================== User Routes ====================
   {
+    path: '/carpool', name: 'CarpoolLobby',
+    component: () => import('@/views/user/CarpoolLobbyView.vue'),
+    meta: { requiresAuth: true, requiresCarpool: true, title: 'Carpool', titleKey: 'carpool.lobby' }
+  },
+  {
+    path: '/carpool/mine', name: 'CarpoolMine',
+    component: () => import('@/views/user/CarpoolMineView.vue'),
+    meta: { requiresAuth: true, requiresCarpool: true, title: 'My Cars', titleKey: 'carpool.mine' }
+  },
+  {
+    path: '/admin/carpool', name: 'AdminCarpool',
+    component: () => import('@/views/admin/CarpoolView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, requiresCarpool: true, title: 'Carpool Management', titleKey: 'carpool.admin' }
+  },
+  {
     path: '/',
     redirect: '/home'
   },
@@ -908,7 +923,7 @@ router.beforeEach(async (to, _from, next) => {
   // 公共设置可能尚未加载（App.vue 的 onMounted 异步拉取晚于首次导航，且纯静态部署
   // 无 __APP_CONFIG__ 注入）。此时 cachedPublicSettings 为空会把 payment/risk_control
   // 误判为“未启用”而错误拦截，故这里先确保设置加载完成。
-  if ((to.meta.requiresPayment || to.meta.requiresRiskControl || to.meta.requiresSubscription) && !appStore.publicSettingsLoaded) {
+  if ((to.meta.requiresPayment || to.meta.requiresRiskControl || to.meta.requiresSubscription || to.meta.requiresCarpool) && !appStore.publicSettingsLoaded) {
     try {
       await appStore.fetchPublicSettings()
     } catch (error) {
@@ -918,6 +933,10 @@ router.beforeEach(async (to, _from, next) => {
 
   // Only an explicit value from successfully loaded settings can disable a route.
   // A transient settings failure is unknown state, not a confirmed feature toggle.
+  if (to.meta.requiresCarpool && appStore.cachedPublicSettings?.carpool_main_enabled !== true) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
+  }
   if (
     to.meta.requiresPayment &&
     appStore.publicSettingsLoaded &&

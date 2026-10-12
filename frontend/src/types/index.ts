@@ -209,6 +209,10 @@ export interface LoginAgreementDocument {
 }
 
 export interface PublicSettings {
+  carpool_main_enabled?: boolean
+  carpool_test_orders_enabled?: boolean
+  carpool_manual_enrollment_enabled?: boolean
+  carpool_control_enabled?: boolean
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean

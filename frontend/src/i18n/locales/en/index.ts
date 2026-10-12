@@ -5,8 +5,10 @@ import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
+import { carpoolEn } from '../carpool'
 
 export default {
+  carpool: carpoolEn,
   ...landing,
   ...common,
   ...dashboard,

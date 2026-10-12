@@ -299,6 +299,11 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		balanceLowNotifyThreshold = v
 	}
 
+	carpoolMainEnabled := s.cfg != nil && s.cfg.CarpoolMain.Enabled && !s.cfg.CarpoolNode.Enabled
+	carpoolTestOrdersEnabled := carpoolMainEnabled && s.cfg.CarpoolMain.TestOrdersEnabled && !s.cfg.CarpoolMain.ManualEnrollmentEnabled
+	carpoolManualEnrollmentEnabled := carpoolMainEnabled && s.cfg.CarpoolMain.ManualEnrollmentEnabled && !s.cfg.CarpoolMain.TestOrdersEnabled
+	carpoolControlEnabled := carpoolMainEnabled && s.cfg.CarpoolControl.Enabled
+
 	return &PublicSettings{
 		RegistrationEnabled:                 settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:                  emailVerifyEnabled,
@@ -367,6 +372,11 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 
 		SubscriptionEnabled: !isFalseSettingValue(settings[SettingKeySubscriptionEnabled]),
+
+		CarpoolMainEnabled:             carpoolMainEnabled,
+		CarpoolTestOrdersEnabled:       carpoolTestOrdersEnabled,
+		CarpoolManualEnrollmentEnabled: carpoolManualEnrollmentEnabled,
+		CarpoolControlEnabled:          carpoolControlEnabled,
 
 		ModelPlazaEnabled:       settings[SettingKeyModelPlazaEnabled] == "true",
 		ModelPlazaRequireAuth:   settings[SettingKeyModelPlazaRequireAuth] == "true",
@@ -633,16 +643,20 @@ type PublicSettingsInjectionPayload struct {
 	// monitors; fail-closed (absent/false = hidden). Admin UI always shows it.
 	// ChannelMonitorHideUserRanking hides the user ranking tab and /users payload
 	// from non-admin channel-monitor v2 viewers; default false (visible).
-	ChannelMonitorHideUserRanking bool `json:"channel_monitor_hide_user_ranking"`
-	ChannelMonitorShowQuota       bool `json:"channel_monitor_show_quota"`
-	AvailableChannelsEnabled      bool `json:"available_channels_enabled"`
-	SubscriptionEnabled           bool `json:"subscription_enabled"`
-	ModelPlazaEnabled             bool `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth         bool `json:"model_plaza_require_auth"`
-	PluginManagementEnabled       bool `json:"plugin_management_enabled"`
-	AffiliateEnabled              bool `json:"affiliate_enabled"`
-	RiskControlEnabled            bool `json:"risk_control_enabled"`
-	AllowUserViewErrorRequests    bool `json:"allow_user_view_error_requests"`
+	ChannelMonitorHideUserRanking  bool `json:"channel_monitor_hide_user_ranking"`
+	ChannelMonitorShowQuota        bool `json:"channel_monitor_show_quota"`
+	AvailableChannelsEnabled       bool `json:"available_channels_enabled"`
+	SubscriptionEnabled            bool `json:"subscription_enabled"`
+	CarpoolMainEnabled             bool `json:"carpool_main_enabled"`
+	CarpoolTestOrdersEnabled       bool `json:"carpool_test_orders_enabled"`
+	CarpoolManualEnrollmentEnabled bool `json:"carpool_manual_enrollment_enabled"`
+	CarpoolControlEnabled          bool `json:"carpool_control_enabled"`
+	ModelPlazaEnabled              bool `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth          bool `json:"model_plaza_require_auth"`
+	PluginManagementEnabled        bool `json:"plugin_management_enabled"`
+	AffiliateEnabled               bool `json:"affiliate_enabled"`
+	RiskControlEnabled             bool `json:"risk_control_enabled"`
+	AllowUserViewErrorRequests     bool `json:"allow_user_view_error_requests"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -721,6 +735,10 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorHideUserRanking:        settings.ChannelMonitorHideUserRanking,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		SubscriptionEnabled:                  settings.SubscriptionEnabled,
+		CarpoolMainEnabled:                   settings.CarpoolMainEnabled,
+		CarpoolTestOrdersEnabled:             settings.CarpoolTestOrdersEnabled,
+		CarpoolManualEnrollmentEnabled:       settings.CarpoolManualEnrollmentEnabled,
+		CarpoolControlEnabled:                settings.CarpoolControlEnabled,
 		ModelPlazaEnabled:                    settings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:                settings.ModelPlazaRequireAuth,
 		PluginManagementEnabled:              settings.PluginManagementEnabled,

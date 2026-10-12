@@ -26,6 +26,7 @@ const appStore = vi.hoisted(() => ({
     payment_enabled?: boolean
     risk_control_enabled?: boolean
     subscription_enabled?: boolean
+    carpool_main_enabled?: boolean
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
@@ -208,5 +209,35 @@ describe('subscription route guard (opt-out flag)', () => {
     await navigation
 
     expect(next).toHaveBeenCalledWith('/admin/dashboard')
+  })
+})
+
+describe('carpool route guard (opt-in)', () => {
+  beforeEach(() => {
+    authStore.isAuthenticated = true
+    authStore.isAdmin = false
+    appStore.publicSettingsLoaded = true
+    appStore.fetchPublicSettings.mockReset()
+  })
+  it.each([undefined, false])('rejects missing or disabled flags (%s)', async (value) => {
+    appStore.cachedPublicSettings = { carpool_main_enabled: value }
+    const { navigation, next } = runGuard({ requiresCarpool: true }, '/carpool')
+    await navigation
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+  it('fails closed when initial settings cannot be loaded', async () => {
+    appStore.publicSettingsLoaded = false
+    appStore.cachedPublicSettings = null
+    appStore.fetchPublicSettings.mockResolvedValue(null)
+    const { navigation, next } = runGuard({ requiresCarpool: true }, '/carpool/mine')
+    await navigation
+    expect(appStore.fetchPublicSettings).toHaveBeenCalled()
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+  it('allows a main-site route with explicit enablement', async () => {
+    appStore.cachedPublicSettings = { carpool_main_enabled: true }
+    const { navigation, next } = runGuard({ requiresCarpool: true }, '/carpool')
+    await navigation
+    expect(next).toHaveBeenCalledWith()
   })
 })

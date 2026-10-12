@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/carpool"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
@@ -55,6 +56,7 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 // ProvideAuthService wires the optional captcha providers into AuthService while
 // keeping NewAuthService's public constructor compatible with existing tests.
 func ProvideAuthService(
+	nodeAccess *carpool.Gate,
 	entClient *dbent.Client,
 	userRepo UserRepository,
 	redeemRepo RedeemCodeRepository,
@@ -88,6 +90,7 @@ func ProvideAuthService(
 	)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
+	svc.nodeAccess = nodeAccess
 	return svc
 }
 
@@ -804,6 +807,7 @@ func ProvideBillingCacheService(
 
 // ProvideAPIKeyService wires APIKeyService and connects rate-limit cache invalidation.
 func ProvideAPIKeyService(
+	nodeAccess *carpool.Gate,
 	apiKeyRepo APIKeyRepository,
 	userRepo UserRepository,
 	groupRepo GroupRepository,
@@ -817,11 +821,20 @@ func ProvideAPIKeyService(
 	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
 	svc.SetRateLimitCacheInvalidator(billingCacheService)
 	svc.SetConcurrencyService(concurrencyService)
+	svc.nodeAccess = nodeAccess
 	return svc
 }
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideCarpoolMainService,
+	ProvideCarpoolControlStore,
+	ProvideCarpoolControlWorker,
+	ProvideCarpoolQuotaWorker,
+	ProvideCarpoolNodeControl,
+	ProvideCarpoolManagedKeys,
+	ProvideCarpoolExpiryWorker,
+	ProvideNodeMembershipGate,
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,

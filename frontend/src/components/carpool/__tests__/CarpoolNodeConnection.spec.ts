@@ -1,0 +1,177 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, reactive, ref } from 'vue'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import type { NodeConnection } from '@/api/carpool'
+import CarpoolNodeConnection from '../CarpoolNodeConnection.vue'
+
+const api = vi.hoisted(() => ({ nativeQuota: vi.fn(), syncNativeQuota: vi.fn(), controlInfo: vi.fn(), nodeConnection: vi.fn(), registerNode: vi.fn(), saveNodeConnection: vi.fn(), checkNodeConnection: vi.fn(), nodeSync: vi.fn(), retryNodeSync: vi.fn(), nativeCarStatus: vi.fn(), nativeAccounts: vi.fn(), prepareNativeCar: vi.fn(), activateNativeCar: vi.fn() }))
+const state = vi.hoisted(() => ({ auth: {} as { user: { id: number } | null } }))
+vi.mock('@/api/carpool', () => ({ carpoolAPI: api }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
+vi.mock('vue-i18n', async original => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key, locale: ref('en') }) }))
+const Dialog = defineComponent({ props: ['show', 'title'], emits: ['close'], template: '<section v-if="show" role="dialog"><h2>{{ title }}</h2><slot/><slot name="footer"/><button data-testid="dismiss" @click="$emit(\'close\')">Close</button></section>' })
+const StepUp = defineComponent({ props: ['controller'], template: '<section v-if="controller.visible.value" data-testid="step-up"><button data-testid="verify" @click="controller.onVerified()">Verify</button></section>' })
+const Pagination = defineComponent({ props: ['page'], emits: ['update:page'], template: '<button data-testid="sync-next" @click="$emit(\'update:page\', page + 1)">Next</button>' })
+const connection = (overrides: Partial<NodeConnection> = {}): NodeConnection => ({
+  main_instance_id: 'main-1', node_id: 'node-1', car_id: 'car-1', hostname: 'node.example', origin: 'https://node.example',
+  node_instance_id: '11111111-1111-4111-8111-111111111111', generation: 3, status: 'ready', credential_configured: true,
+  credential_mask: '********', last_error_code: '', check_operation: '', verified_at: null, updated_at: '2026-09-19T00:00:00Z', ...overrides
+})
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+let wrapper: VueWrapper
+function mountPanel(props = {}) { wrapper = mount(CarpoolNodeConnection, { props: { show: true, carID: 'car-1', carName: 'Test car', enabled: true, ...props }, global: { stubs: { BaseDialog: Dialog, TotpStepUpDialog: StepUp, Pagination, Icon: true } } }); return wrapper }
+const field = (id: string) => wrapper.get(`[data-testid="node-${id}"]`)
+beforeEach(() => {
+  vi.resetAllMocks(); sessionStorage.clear(); localStorage.clear()
+  state.auth = reactive({ user: { id: 1 } })
+  api.controlInfo.mockResolvedValue({ main_instance_id: 'main-1', protocol_version: 1 })
+  api.nodeConnection.mockResolvedValue(connection())
+  api.nodeSync.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
+  api.saveNodeConnection.mockResolvedValue(connection({ generation: 4, status: 'unverified' }))
+  api.checkNodeConnection.mockResolvedValue(connection())
+  api.retryNodeSync.mockResolvedValue({ queued: true })
+  api.nativeCarStatus.mockResolvedValue({ account_id: 0, group_id: 0, capacity: 4, prepared_at: null, service_start: null, service_end: null, can_prepare: true, can_activate: false })
+  api.nativeAccounts.mockResolvedValue([{ id: 11, name: 'Selected OAuth', platform: 'openai' }, { id: 12, name: 'Another OAuth', platform: 'openai' }])
+})
+afterEach(() => wrapper?.unmount())
+
+describe('administrator node connection', () => {
+  it('refreshes native quota with step-up and the selected car only', async () => {
+    api.nativeCarStatus.mockResolvedValue({ account_id: 11, group_id: 7, capacity: 4, can_prepare: false, can_activate: false })
+    const quota = { weekly_limit_usd: 475, state: 'ready', utilization: 25, estimated_total: 2000, resets_at: null, observed_at: null, quota_updated_at: null }
+    api.nativeQuota.mockResolvedValue(quota)
+    api.syncNativeQuota.mockRejectedValueOnce({ code: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce({ ...quota, weekly_limit_usd: 225 })
+    mountPanel(); await flushPromises()
+    expect(field('weekly-limit').text()).toContain('475.00')
+    await field('quota-sync').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="verify"]').trigger('click'); await flushPromises()
+    expect(api.syncNativeQuota).toHaveBeenNthCalledWith(1, 'car-1')
+    expect(api.syncNativeQuota).toHaveBeenNthCalledWith(2, 'car-1')
+    expect(field('weekly-limit').text()).toContain('225.00')
+  })
+  it('disables initialization while a car is not full', async () => {
+    api.nativeCarStatus.mockResolvedValue({ account_id: 0, group_id: 0, capacity: 4, can_prepare: false, can_activate: false })
+    mountPanel(); await flushPromises()
+    await field('account').setValue('11')
+    expect(field('prepare').attributes('disabled')).toBeDefined()
+    expect(api.prepareNativeCar).not.toHaveBeenCalled()
+  })
+  it('discovers a new node instance without requiring a pasted identifier', async () => {
+    let sent: unknown
+    api.saveNodeConnection.mockImplementationOnce(async (_id, input) => { sent = { ...input }; return connection() })
+    api.nodeConnection.mockResolvedValue(connection({ generation: 0, credential_configured: false, node_instance_id: '' }))
+    mountPanel(); await flushPromises()
+    await field('secret').setValue('synthetic-secret')
+    expect(field('save').attributes('disabled')).toBeUndefined()
+    await field('save').trigger('click'); await flushPromises()
+    expect(sent).toEqual(expect.objectContaining({ node_instance_id: '', admin_key: 'synthetic-secret' }))
+  })
+  it('does not show another car\'s late account list', async () => {
+    const pending = deferred<{ id: number; name: string; platform: string }[]>()
+    api.nativeAccounts.mockReturnValueOnce(pending.promise)
+    mountPanel(); await flushPromises()
+    await wrapper.setProps({ carID: 'car-2' }); await flushPromises()
+    pending.resolve([{ id: 999, name: 'Previous car account', platform: 'openai' }]); await flushPromises()
+    expect(wrapper.text()).not.toContain('Previous car account')
+  })
+  it('requires account selection and explicit activation confirmation', async () => {
+    mountPanel(); await flushPromises()
+    expect(api.prepareNativeCar).not.toHaveBeenCalled()
+    expect(field('prepare').attributes('disabled')).toBeDefined()
+    await field('account').setValue('12')
+    api.prepareNativeCar.mockResolvedValue({ account_id: 12, group_id: 7, capacity: 4, prepared_at: '2026-09-23T00:00:00Z', can_activate: false })
+    await field('prepare').trigger('click'); await flushPromises()
+    expect(api.prepareNativeCar).toHaveBeenCalledWith('car-1', 12)
+    expect(api.activateNativeCar).not.toHaveBeenCalled()
+    api.nativeCarStatus.mockResolvedValue({ account_id: 12, group_id: 7, capacity: 4, can_activate: true, service_start: null, service_end: null })
+    await field('refresh').trigger('click'); await flushPromises()
+    expect(field('activate').attributes('disabled')).toBeDefined()
+    await field('activate-confirm').setValue(true)
+    api.activateNativeCar.mockResolvedValue({ account_id: 12, group_id: 7, capacity: 4, can_activate: false, service_start: '2026-09-23T00:00:00Z', service_end: '2026-10-23T00:00:00Z' })
+    await field('activate').trigger('click'); await flushPromises()
+    expect(api.activateNativeCar).toHaveBeenCalledWith('car-1')
+    expect(field('activate').attributes('disabled')).toBeDefined()
+  })
+  it('does not read or render when disabled or signed out', async () => {
+    mountPanel({ enabled: false }); await flushPromises()
+    expect(api.nodeConnection).not.toHaveBeenCalled(); expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    state.auth.user = null; await wrapper.setProps({ enabled: true }); await flushPromises()
+    expect(api.nodeConnection).not.toHaveBeenCalled()
+  })
+  it('shows masked metadata and preserves the credential on a blank replacement with the current generation', async () => {
+    mountPanel(); await flushPromises()
+    expect(wrapper.text()).toContain('main-1'); expect(wrapper.text()).toContain('node-1')
+    expect(wrapper.text()).toContain('********'); expect(field('secret').attributes('type')).toBe('password')
+    await field('save').trigger('click'); await flushPromises()
+    expect(api.saveNodeConnection).toHaveBeenCalledWith('node-1', expect.objectContaining({ admin_key: '', expected_generation: 3 }))
+    expect(api.checkNodeConnection).not.toHaveBeenCalled()
+  })
+  it('registers an unconfigured car, then reloads its node identifiers without activating it', async () => {
+    api.nodeConnection.mockRejectedValueOnce({ status: 404 }).mockResolvedValueOnce(connection({ generation: 0, credential_configured: false, origin: '', node_instance_id: '' }))
+    api.registerNode.mockResolvedValue({ id: 'node-1' })
+    mountPanel(); await flushPromises()
+    await field('hostname').setValue('node.example'); await field('label').setValue('Node B')
+    await field('register').trigger('click'); await flushPromises()
+    expect(api.registerNode).toHaveBeenCalledWith({ car_id: 'car-1', hostname: 'node.example', label: 'Node B' })
+    expect(field('save').attributes('disabled')).toBeDefined()
+    expect(api.saveNodeConnection).not.toHaveBeenCalled()
+  })
+  it('clears credentials after saving and never stores them', async () => {
+    mountPanel(); await flushPromises(); await field('secret').setValue('synthetic-secret')
+    await field('save').trigger('click'); await flushPromises()
+    expect((field('secret').element as HTMLInputElement).value).toBe('')
+    expect(JSON.stringify(sessionStorage)).not.toContain('synthetic-secret'); expect(JSON.stringify(localStorage)).not.toContain('synthetic-secret')
+  })
+  it('locks writes after an uncertain save until a successful reload gives a fresh generation', async () => {
+    api.saveNodeConnection.mockRejectedValueOnce({ status: 503, message: 'synthetic-secret' })
+    mountPanel(); await flushPromises(); await field('secret').setValue('synthetic-secret')
+    await field('save').trigger('click'); await flushPromises()
+    expect(field('save').attributes('disabled')).toBeDefined(); expect(wrapper.text()).not.toContain('synthetic-secret')
+    expect((field('secret').element as HTMLInputElement).value).toBe('')
+    api.nodeConnection.mockResolvedValueOnce(connection({ generation: 8 }))
+    await field('refresh').trigger('click'); await flushPromises(); await field('save').trigger('click'); await flushPromises()
+    expect(api.saveNodeConnection).toHaveBeenLastCalledWith('node-1', expect.objectContaining({ expected_generation: 8, admin_key: '' }))
+  })
+  it('disables the connection with the persisted target and blank credential, not unsaved fields', async () => {
+    mountPanel(); await flushPromises(); await field('origin').setValue('https://edited.example')
+    await field('toggle').trigger('click'); await flushPromises()
+    expect(api.saveNodeConnection).toHaveBeenCalledWith('node-1', expect.objectContaining({ origin: 'https://node.example', disabled: true, expected_generation: 3, admin_key: '' }))
+  })
+  it('uses step-up on writes and replays exactly the original snapshot', async () => {
+    api.saveNodeConnection.mockRejectedValueOnce({ code: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce(connection({ generation: 4 }))
+    mountPanel(); await flushPromises(); await field('secret').setValue('synthetic-secret')
+    await field('save').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-testid="step-up"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="verify"]').trigger('click'); await flushPromises()
+    expect(api.saveNodeConnection.mock.calls[1]).toEqual(api.saveNodeConnection.mock.calls[0])
+  })
+  it('cancels a pending step-up when dismissed and clears the secret even if the parent leaves show true', async () => {
+    api.saveNodeConnection.mockRejectedValueOnce({ code: 'STEP_UP_REQUIRED' })
+    mountPanel(); await flushPromises(); await field('secret').setValue('synthetic-secret'); await field('save').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="dismiss"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false); expect(wrapper.find('[data-testid="step-up"]').exists()).toBe(false)
+    expect(api.saveNodeConnection).toHaveBeenCalledTimes(1)
+  })
+  it.each(['close', 'logout', 'feature', 'car'])('ignores a late step-up rejection after %s', async reason => {
+    const pending = deferred<NodeConnection>(); api.saveNodeConnection.mockReturnValueOnce(pending.promise)
+    mountPanel(); await flushPromises(); await field('secret').setValue('synthetic-secret'); await field('save').trigger('click')
+    if (reason === 'close') await wrapper.get('[data-testid="dismiss"]').trigger('click')
+    if (reason === 'logout') { state.auth.user = null; await flushPromises() }
+    if (reason === 'feature') await wrapper.setProps({ enabled: false })
+    if (reason === 'car') await wrapper.setProps({ carID: 'car-2' })
+    pending.reject({ code: 'STEP_UP_REQUIRED' }); await flushPromises()
+    expect(wrapper.find('[data-testid="step-up"]').exists()).toBe(false)
+    expect(api.saveNodeConnection).toHaveBeenCalledTimes(1)
+    expect(wrapper.html()).not.toContain('synthetic-secret')
+  })
+  it('paginates synchronization separately and only retries on an explicit command', async () => {
+    api.nodeSync.mockResolvedValue({ items: [{ membership_id: 'member-1', user_id: 2, status: 'prepared', delivery: 'error', version: 2, ack_version: 0, attempts: 6, last_error_code: 'CARPOOL_CONTROL_AUTH' }], total: 30, page: 1, page_size: 20 })
+    mountPanel(); await flushPromises()
+    expect(wrapper.text()).toContain('member-1'); expect(api.retryNodeSync).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="sync-next"]').trigger('click'); await flushPromises()
+    expect(api.nodeSync).toHaveBeenLastCalledWith('car-1', { page: 2, page_size: 20 })
+    await field('retry-sync').trigger('click'); await flushPromises()
+    expect(api.retryNodeSync).toHaveBeenCalledWith('car-1')
+    expect(wrapper.text()).toContain('carpool.control.queued')
+  })
+})

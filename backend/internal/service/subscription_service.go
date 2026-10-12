@@ -55,8 +55,9 @@ type SubscriptionService struct {
 	subCacheTTL    time.Duration
 	subCacheJitter int // 抖动百分比
 
-	maintenanceQueue *SubscriptionMaintenanceQueue
-	now              func() time.Time
+	maintenanceQueue   *SubscriptionMaintenanceQueue
+	now                func() time.Time
+	weeklyAnchorPolicy func(context.Context, int64) (bool, error)
 }
 
 // NewSubscriptionService 创建订阅服务
@@ -736,7 +737,14 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 
 // GetByID 根据ID获取订阅
 func (s *SubscriptionService) GetByID(ctx context.Context, id int64) (*UserSubscription, error) {
-	return s.userSubRepo.GetByID(ctx, id)
+	sub, err := s.userSubRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.applyWeeklyAnchorPolicy(ctx, sub); err != nil {
+		return nil, err
+	}
+	return sub, nil
 }
 
 // GetActiveSubscription 获取用户对特定分组的有效订阅
@@ -750,6 +758,9 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 		if v, ok := s.subCacheL1.Get(key); ok {
 			if sub, ok := v.(*UserSubscription); ok {
 				cp := *sub
+				if err := s.applyWeeklyAnchorPolicy(ctx, &cp); err != nil {
+					return nil, err
+				}
 				return &cp, nil
 			}
 		}
@@ -776,6 +787,9 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 		return nil, ErrSubscriptionNotFound
 	}
 	cp := *sub
+	if err := s.applyWeeklyAnchorPolicy(ctx, &cp); err != nil {
+		return nil, err
+	}
 	return &cp, nil
 }
 
@@ -783,6 +797,9 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 func (s *SubscriptionService) ListUserSubscriptions(ctx context.Context, userID int64) ([]UserSubscription, error) {
 	subs, err := s.userSubRepo.ListByUserID(ctx, userID)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.applyWeeklyAnchorPolicies(ctx, subs); err != nil {
 		return nil, err
 	}
 	normalizeExpiredWindows(subs)
@@ -796,6 +813,9 @@ func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	if err = s.applyWeeklyAnchorPolicies(ctx, subs); err != nil {
+		return nil, err
+	}
 	normalizeExpiredWindows(subs)
 	return subs, nil
 }
@@ -805,6 +825,9 @@ func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupI
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
 	subs, pag, err := s.userSubRepo.ListByGroupID(ctx, groupID, params)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = s.applyWeeklyAnchorPolicies(ctx, subs); err != nil {
 		return nil, nil, err
 	}
 	normalizeExpiredWindows(subs)
@@ -817,6 +840,9 @@ func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, user
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
 	subs, pag, err := s.userSubRepo.List(ctx, params, userID, groupID, status, platform, sortBy, sortOrder)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = s.applyWeeklyAnchorPolicies(ctx, subs); err != nil {
 		return nil, nil, err
 	}
 	normalizeExpiredWindows(subs)
@@ -911,6 +937,9 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 
 // CheckAndResetWindows 检查并重置过期的窗口
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
+	if err := s.applyWeeklyAnchorPolicy(ctx, sub); err != nil {
+		return err
+	}
 	now := s.now()
 	needsInvalidateCache := false
 
@@ -976,7 +1005,7 @@ func (s *SubscriptionService) EnsureWindowMaintenance(ctx context.Context, sub *
 
 	// GetByID bypasses the service caches. This prevents a stale loser of the
 	// CAS from validating limits against zeroed in-memory usage.
-	refreshed, err := s.userSubRepo.GetByID(ctx, sub.ID)
+	refreshed, err := s.GetByID(ctx, sub.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1118,7 +1147,7 @@ type UsageWindowProgress struct {
 
 // GetSubscriptionProgress 获取订阅使用进度
 func (s *SubscriptionService) GetSubscriptionProgress(ctx context.Context, subscriptionID int64) (*SubscriptionProgress, error) {
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	sub, err := s.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return nil, ErrSubscriptionNotFound
 	}
@@ -1232,6 +1261,9 @@ func (s *SubscriptionService) GetUserSubscriptionsWithProgress(ctx context.Conte
 	// ListActiveByUserID 已使用 .WithGroup() eager-load Group 关联，1 次查询获取所有数据
 	subs, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.applyWeeklyAnchorPolicies(ctx, subs); err != nil {
 		return nil, err
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	apperrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -86,6 +87,11 @@ func jwtAuth(
 		}
 
 		// Security: Validate TokenVersion to ensure token hasn't been invalidated
+		if err := authService.CheckNodeUser(c.Request.Context(), user); err != nil {
+			AbortWithError(c, apperrors.Code(err), apperrors.Reason(err), apperrors.Message(err))
+			return
+		}
+
 		// This check ensures tokens issued before a password change are rejected
 		if claims.TokenVersion != user.TokenVersion {
 			AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")

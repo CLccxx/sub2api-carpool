@@ -252,6 +252,10 @@ func (s *APIKeyService) setAuthCacheEntry(ctx context.Context, cacheKey string, 
 }
 
 func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
+	_ = s.deleteAuthCacheWithError(ctx, cacheKey)
+}
+
+func (s *APIKeyService) deleteAuthCacheWithError(ctx context.Context, cacheKey string) error {
 	if s.authCacheL1 != nil {
 		s.authCacheL1.Del(cacheKey)
 	}
@@ -259,11 +263,10 @@ func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
 		s.authNegativeCacheL1.Del(cacheKey)
 	}
 	if s.cache == nil {
-		return
+		return nil
 	}
-	_ = s.cache.DeleteAuthCache(ctx, cacheKey)
 	// Publish invalidation message to other instances
-	_ = s.cache.PublishAuthCacheInvalidation(ctx, cacheKey)
+	return errors.Join(s.cache.DeleteAuthCache(ctx, cacheKey), s.cache.PublishAuthCacheInvalidation(ctx, cacheKey))
 }
 
 func (s *APIKeyService) loadAuthCacheEntry(ctx context.Context, key, cacheKey string) (*APIKeyAuthCacheEntry, error) {

@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/carpool"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -1134,6 +1135,73 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
 	require.NoError(t, err)
 	require.NotNil(t, storedSession.ConsumedAt)
+}
+
+func TestNodeCreateOIDCOAuthAccountBindsBeforeIssuingTokens(t *testing.T) {
+	for _, scenario := range []string{"granted", "absent", "revoked_during_binding"} {
+		t.Run(scenario, func(t *testing.T) {
+			handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
+				nodeMode:           true,
+				emailVerifyEnabled: true,
+				emailCache: &oauthPendingFlowEmailCacheStub{verificationCodes: map[string]*service.VerificationCodeData{
+					"node@example.com": {Code: "246810", ExpiresAt: time.Now().Add(time.Hour)},
+				}},
+			})
+			ctx := context.Background()
+			db, err := sql.Open("sqlite", "file:auth_oauth_pending_flow_handler?mode=memory&cache=shared")
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			if scenario != "absent" {
+				_, err = db.Exec(`INSERT INTO carpool_node_memberships VALUES ('b','1','https://issuer.example','node-subject','active','2000-01-01','2999-01-01','2999-01-01')`)
+				require.NoError(t, err)
+			}
+			session, err := client.PendingAuthSession.Create().SetSessionToken("node-pending").SetIntent("login").
+				SetProviderType("oidc").SetProviderKey("https://issuer.example").SetProviderSubject("node-subject").
+				SetBrowserSessionKey("node-browser").SetExpiresAt(time.Now().Add(time.Minute)).Save(ctx)
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			ginCtx, _ := gin.CreateTestContext(recorder)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/oidc/create-account", bytes.NewBufferString(`{"email":"node@example.com","verify_code":"246810","password":"secret-123","adopt_display_name":false,"adopt_avatar":false}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
+			req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("node-browser")})
+			ginCtx.Request = req
+			if scenario == "revoked_during_binding" {
+				pendingOAuthCreateAccountPreCommitHook = func(txCtx context.Context, _ *dbent.PendingAuthSession) error {
+					_, updateErr := dbent.TxFromContext(txCtx).Client().ExecContext(txCtx, `UPDATE carpool_node_memberships SET status='revoked'`)
+					return updateErr
+				}
+				t.Cleanup(func() { pendingOAuthCreateAccountPreCommitHook = nil })
+			}
+			handler.CreateOIDCOAuthAccount(ginCtx)
+			if scenario == "absent" {
+				require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+				count, countErr := client.User.Query().Count(ctx)
+				require.NoError(t, countErr)
+				require.Zero(t, count)
+				return
+			}
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+			if scenario == "revoked_during_binding" {
+				require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+				require.Empty(t, payload["access_token"])
+				require.Empty(t, payload["refresh_token"])
+			} else {
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				require.NotEmpty(t, payload["access_token"])
+				require.NotEmpty(t, payload["refresh_token"])
+			}
+			identity, err := client.AuthIdentity.Query().Where(authidentity.ProviderSubjectEQ("node-subject")).Only(ctx)
+			require.NoError(t, err)
+			user, err := client.User.Get(ctx, identity.UserID)
+			require.NoError(t, err)
+			require.Zero(t, user.Balance)
+			stored, err := client.PendingAuthSession.Get(ctx, session.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored.ConsumedAt)
+		})
+	}
 }
 
 func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) {
@@ -2513,6 +2581,7 @@ func newOAuthPendingFlowTestHandlerWithOptions(
 }
 
 type oauthPendingFlowTestHandlerOptions struct {
+	nodeMode           bool
 	invitationEnabled  bool
 	emailVerifyEnabled bool
 	emailCache         service.EmailCache
@@ -2622,7 +2691,15 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 			},
 		}, options.emailCache)
 	}
-	authSvc := service.NewAuthService(
+	var nodeGate *carpool.Gate
+	if options.nodeMode {
+		cfg.CarpoolNode = carpool.Config{Enabled: true, NodeID: "b", CarID: "1", Issuer: "https://issuer.example"}
+		_, err = db.Exec(`CREATE TABLE carpool_node_memberships (node_id TEXT,car_id TEXT,issuer TEXT,subject TEXT,status TEXT,valid_from TEXT,valid_until TEXT,lease_until TEXT)`)
+		require.NoError(t, err)
+		nodeGate = carpool.NewGate(db, cfg.CarpoolNode)
+	}
+	authSvc := service.ProvideAuthService(
+		nodeGate,
 		client,
 		userRepo,
 		redeemRepo,
@@ -2630,6 +2707,8 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 		cfg,
 		settingSvc,
 		emailService,
+		nil,
+		nil,
 		nil,
 		nil,
 		promoService,

@@ -62,4 +62,19 @@ describe('resolveFeatureFlag', () => {
     useAppStore().cachedPublicSettings = { subscription_enabled: false } as PublicSettings
     expect(isFeatureFlagEnabled(FeatureFlags.subscription)).toBe(false)
   })
+
+  it('shows carpool navigation only with explicit main enablement', () => {
+    const flag = makeSidebarFlag(FeatureFlags.carpool)
+    expect(flag()).toBe(false)
+    useAppStore().cachedPublicSettings = { carpool_main_enabled: false } as PublicSettings
+    expect(flag()).toBe(false)
+    useAppStore().cachedPublicSettings = { carpool_main_enabled: true } as PublicSettings
+    expect(flag()).toBe(true)
+  })
+  it('keeps node controls opt-in when settings are absent or false', () => {
+    expect(resolveFeatureFlag(null, FeatureFlags.carpoolControl)).toBe(false)
+    expect(resolveFeatureFlag({} as PublicSettings, FeatureFlags.carpoolControl)).toBe(false)
+    expect(resolveFeatureFlag({ carpool_control_enabled: false } as PublicSettings, FeatureFlags.carpoolControl)).toBe(false)
+    expect(resolveFeatureFlag({ carpool_control_enabled: true } as PublicSettings, FeatureFlags.carpoolControl)).toBe(true)
+  })
 })

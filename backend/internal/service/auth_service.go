@@ -71,6 +71,7 @@ type JWTClaims struct {
 
 // AuthService 认证服务
 type AuthService struct {
+	nodeAccess            NodeMembershipGate
 	entClient             *dbent.Client
 	userRepo              UserRepository
 	redeemRepo            RedeemCodeRepository
@@ -161,6 +162,9 @@ func (s *AuthService) Register(ctx context.Context, email, password string) (str
 
 // RegisterWithVerification 用户注册（支持邮件验证、优惠码、邀请码和邀请返利码），返回token和用户。
 func (s *AuthService) RegisterWithVerification(ctx context.Context, email, password, verifyCode, promoCode, invitationCode, affiliateCode string) (string, *User, error) {
+	if s.NodeMode() {
+		return "", nil, ErrRegDisabled
+	}
 	// 检查是否开放注册（默认关闭：settingService 未配置时不允许注册）
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
 		return "", nil, ErrRegDisabled
@@ -866,6 +870,9 @@ func (s *AuthService) ApplyOAuthSignupPromoCode(ctx context.Context, userID int6
 }
 
 func (s *AuthService) applyOAuthSignupPromoCode(ctx context.Context, user *User, promoCode string) *User {
+	if s.NodeMode() {
+		return user
+	}
 	promoCode = strings.TrimSpace(promoCode)
 	if user == nil || user.ID <= 0 || promoCode == "" || s.promoService == nil || s.settingService == nil || !s.settingService.IsPromoCodeEnabled(ctx) {
 		return user
@@ -897,6 +904,9 @@ func (s *AuthService) assignSubscriptions(ctx context.Context, userID int64, ite
 }
 
 func (s *AuthService) resolveSignupGrantPlan(ctx context.Context, signupSource string) signupGrantPlan {
+	if s.NodeMode() {
+		return signupGrantPlan{Concurrency: 1}
+	}
 	plan := signupGrantPlan{}
 	if s != nil && s.cfg != nil {
 		plan.Balance = s.cfg.Default.UserBalance
@@ -1409,6 +1419,9 @@ func isReservedEmail(email string) bool {
 // 使用新的access_token_expire_minutes配置项（如果配置了），否则回退到expire_hour。
 // 会话指纹（IP/UA）从 ctx 中提取（由 HTTP 入口中间件注入），缺失时生成不带绑定的 token。
 func (s *AuthService) GenerateToken(ctx context.Context, user *User) (string, error) {
+	if err := s.CheckNodeUser(ctx, user); err != nil {
+		return "", err
+	}
 	sessionID, err := randomHexString(8)
 	if err != nil {
 		return "", fmt.Errorf("generate session id: %w", err)
@@ -1687,6 +1700,9 @@ type TokenPairWithUser struct {
 // GenerateTokenPair 生成Access Token和Refresh Token对
 // familyID: 可选的Token家族ID，用于Token轮转时保持家族关系
 func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyID string) (*TokenPair, error) {
+	if err := s.CheckNodeUser(ctx, user); err != nil {
+		return nil, err
+	}
 	// 检查 refreshTokenCache 是否可用
 	if s.refreshTokenCache == nil {
 		return nil, errors.New("refresh token cache not configured")

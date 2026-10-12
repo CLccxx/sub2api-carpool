@@ -114,6 +114,11 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 		SubscriptionEnabled:      settings.SubscriptionEnabled,
 
+		CarpoolMainEnabled:             settings.CarpoolMainEnabled,
+		CarpoolTestOrdersEnabled:       settings.CarpoolTestOrdersEnabled,
+		CarpoolManualEnrollmentEnabled: settings.CarpoolManualEnrollmentEnabled,
+		CarpoolControlEnabled:          settings.CarpoolControlEnabled,
+
 		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   settings.ModelPlazaRequireAuth,
 		PluginManagementEnabled: settings.PluginManagementEnabled,

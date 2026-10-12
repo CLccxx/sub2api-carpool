@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -13,6 +14,32 @@ import (
 func init() {
 	// cors_test 与 security_headers_test 在同一个包，但 init 是幂等的
 	gin.SetMode(gin.TestMode)
+}
+
+func TestCORS_CarpoolIdempotencyPreflight(t *testing.T) {
+	for _, origin := range []string{"https://allowed.example.com", "https://other.example.com"} {
+		t.Run(origin, func(t *testing.T) {
+			router := gin.New()
+			router.Use(CORS(config.CORSConfig{AllowedOrigins: []string{"https://allowed.example.com"}}))
+			router.POST("/api/v1/carpool/cars/id/reservations", func(c *gin.Context) { c.Status(http.StatusOK) })
+			req := httptest.NewRequest(http.MethodOptions, "/api/v1/carpool/cars/id/reservations", nil)
+			req.Header.Set("Origin", origin)
+			req.Header.Set("Access-Control-Request-Method", "POST")
+			req.Header.Set("Access-Control-Request-Headers", "authorization,content-type,idempotency-key")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if origin == "https://allowed.example.com" {
+				assert.Equal(t, http.StatusNoContent, w.Code)
+				assert.Equal(t, origin, w.Header().Get("Access-Control-Allow-Origin"))
+				headers := strings.Split(strings.ToLower(strings.ReplaceAll(w.Header().Get("Access-Control-Allow-Headers"), " ", "")), ",")
+				assert.Contains(t, headers, "idempotency-key")
+			} else {
+				assert.Equal(t, http.StatusForbidden, w.Code)
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Headers"))
+			}
+		})
+	}
 }
 
 // --- Task 8.2: 验证 CORS 条件化头部 ---

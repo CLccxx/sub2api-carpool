@@ -6,6 +6,8 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types'
 import { getLocale } from '@/i18n'
+import { clearManualCommandJournals } from '@/utils/carpoolManualJournal'
+import { clearNodeKeyJournals } from '@/utils/carpoolKeyJournal'
 import {
   ADMIN_UI_REQUEST_HEADER,
   USER_UI_REQUEST_HEADER,
@@ -51,8 +53,9 @@ apiClient.interceptors.request.use(
       config.headers['Accept-Language'] = getLocale()
     }
 
-    // Attach timezone for all GET requests (backend may use it for default date ranges)
-    if (config.method === 'get') {
+    // Carpool has strict query allowlists and explicit UTC date ranges.
+    const fixedCarpoolQuery = /^\/(?:admin\/)?carpool(?:\/|$)/.test(config.url || '')
+    if (config.method === 'get' && !fixedCarpoolQuery) {
       if (!config.params) {
         config.params = {}
       }
@@ -212,6 +215,8 @@ apiClient.interceptors.response.use(
             }
 
             // Clear tokens and redirect to login
+            clearManualCommandJournals()
+            clearNodeKeyJournals()
             localStorage.removeItem('auth_token')
             localStorage.removeItem('refresh_token')
             localStorage.removeItem('auth_user')
@@ -241,6 +246,8 @@ apiClient.interceptors.response.use(
               ? authHeader.length > 0
               : !!authHeader
 
+        clearManualCommandJournals()
+        clearNodeKeyJournals()
         localStorage.removeItem('auth_token')
         localStorage.removeItem('refresh_token')
         localStorage.removeItem('auth_user')

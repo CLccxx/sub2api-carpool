@@ -5,6 +5,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, readonly } from 'vue'
+import { clearManualCommandJournals } from '@/utils/carpoolManualJournal'
+import { clearNodeKeyJournals } from '@/utils/carpoolKeyJournal'
 import { authAPI, isTotp2FARequired, passkeyAPI, type LoginResponse } from '@/api'
 import type {
   User,
@@ -463,6 +465,8 @@ export const useAuthStore = defineStore('auth', () => {
    * Internal helper function
    */
   function clearAuth(options?: { preservePendingAuthSession?: boolean }): void {
+    clearManualCommandJournals()
+    clearNodeKeyJournals()
     // Stop auto-refresh
     stopAutoRefresh()
     // Stop token refresh

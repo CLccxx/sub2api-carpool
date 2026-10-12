@@ -403,6 +403,12 @@ type PublicSettings struct {
 	// Subscription feature switch (see SystemSettings.SubscriptionEnabled)
 	SubscriptionEnabled bool `json:"subscription_enabled"`
 
+	// Read-only deployment capabilities, derived from config rather than DB settings.
+	CarpoolMainEnabled             bool `json:"carpool_main_enabled"`
+	CarpoolTestOrdersEnabled       bool `json:"carpool_test_orders_enabled"`
+	CarpoolManualEnrollmentEnabled bool `json:"carpool_manual_enrollment_enabled"`
+	CarpoolControlEnabled          bool `json:"carpool_control_enabled"`
+
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`

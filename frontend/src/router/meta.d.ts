@@ -7,6 +7,7 @@ import 'vue-router'
 
 declare module 'vue-router' {
   interface RouteMeta {
+    requiresCarpool?: boolean
     /**
      * Whether this route requires authentication
      * @default true

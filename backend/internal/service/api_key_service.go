@@ -283,6 +283,7 @@ type RateLimitCacheInvalidator interface {
 }
 
 type APIKeyService struct {
+	nodeAccess                NodeMembershipGate
 	apiKeyRepo                APIKeyRepository
 	userRepo                  UserRepository
 	groupRepo                 GroupRepository
@@ -459,6 +460,9 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 
 // Create 创建API Key
 func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
+	if err := s.CheckNodeUser(ctx, userID); err != nil {
+		return nil, err
+	}
 	if err := validateCreateAPIKeyRequest(req); err != nil {
 		return nil, err
 	}

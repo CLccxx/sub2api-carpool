@@ -110,6 +110,20 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 	invitationCode string,
 	signupSource string,
 ) (*TokenPair, *User, error) {
+	return s.registerOAuthEmailAccount(ctx, email, password, verifyCode, invitationCode, signupSource, true)
+}
+
+// PrepareNodeOAuthEmailAccount checks the pending identity before account creation.
+// The caller must commit its binding before requesting gated session tokens.
+func (s *AuthService) PrepareNodeOAuthEmailAccount(ctx context.Context, identity PendingAuthIdentityKey, email, password, verifyCode, invitationCode string) (*User, error) {
+	if err := s.CheckNodeIdentity(ctx, identity.ProviderType, identity.ProviderKey, identity.ProviderSubject); err != nil {
+		return nil, err
+	}
+	_, user, err := s.registerOAuthEmailAccount(ctx, email, password, verifyCode, invitationCode, identity.ProviderType, false)
+	return user, err
+}
+
+func (s *AuthService) registerOAuthEmailAccount(ctx context.Context, email, password, verifyCode, invitationCode, signupSource string, issueTokens bool) (*TokenPair, *User, error) {
 	if s == nil {
 		return nil, nil, ErrServiceUnavailable
 	}
@@ -175,6 +189,9 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 		}
 	}
 
+	if !issueTokens {
+		return nil, user, nil
+	}
 	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
 	if err != nil {
 		_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID, "")

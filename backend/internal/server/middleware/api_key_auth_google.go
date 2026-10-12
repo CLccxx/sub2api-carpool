@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	apperrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -121,6 +122,10 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 				MarkIngressRejected(c, IngressRejectGroupDisabled)
 			}
 			abortWithGoogleError(c, 403, message)
+			return
+		}
+		if err := apiKeyService.CheckNodeUser(c.Request.Context(), apiKey.User.ID); err != nil {
+			abortWithGoogleError(c, apperrors.Code(err), apperrors.Message(err))
 			return
 		}
 		// 专属分组授权校验：用户对该专属分组的授权被撤销后应拒绝（与主中间件一致，防止越权）。

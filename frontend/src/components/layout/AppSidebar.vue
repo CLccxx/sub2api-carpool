@@ -693,6 +693,7 @@ const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
 const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
+const flagCarpool = makeSidebarFlag(FeatureFlags.carpool)
 
 // 购买入口文案随站点计费模式切换：仅充值 → 「充值」，仅订阅 → 「订阅」，否则「充值/订阅」。
 const purchaseNavLabel = computed(() => {
@@ -729,6 +730,8 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
+    { path: '/carpool', label: t('carpool.lobby'), icon: UsersIcon, featureFlag: flagCarpool },
+    { path: '/carpool/mine', label: t('carpool.mine'), icon: OrderListIcon, featureFlag: flagCarpool },
     { path: '/purchase', label: purchaseNavLabel.value, icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
@@ -792,6 +795,7 @@ const adminNavItems = computed((): NavItem[] => {
     },
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
+    { path: '/admin/carpool', label: t('carpool.admin'), icon: UsersIcon, featureFlag: flagCarpool },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
@@ -894,6 +898,7 @@ function handleMenuItemClick(itemPath: string) {
 }
 
 function isActive(path: string): boolean {
+  if (path === '/carpool') return route.path === path
   return route.path === path || route.path.startsWith(path + '/')
 }
 

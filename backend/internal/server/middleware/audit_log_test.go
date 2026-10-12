@@ -188,3 +188,40 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
+
+func TestCarpoolControlCredentialBodyOmitted(t *testing.T) {
+	require.Contains(t, auditBodyOmittedRoutes, "PUT /api/v1/admin/carpool/nodes/:id/connection")
+	require.Contains(t, auditBodyOmittedRoutes, "POST /api/v1/admin/carpool/nodes/:id/connection/check")
+}
+
+func TestCarpoolManualAuditOmitsFinancialDetails(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/admin/carpool/cars/:id/members",
+		"/api/v1/admin/carpool/cars/:id/cancel",
+		"/api/v1/admin/carpool/orders/:id/withdraw",
+		"/api/v1/admin/carpool/orders/:id/refund",
+	} {
+		require.Contains(t, auditBodyOmittedRoutes, "POST "+path)
+	}
+	repository := &auditCaptureRepository{}
+	svc := service.NewAuditLogService(repository, nil)
+	svc.Start()
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(svc)))
+	router.POST("/api/v1/admin/carpool/cars/:id/members", func(c *gin.Context) { c.Status(200) })
+	req := httptest.NewRequest("POST", "/api/v1/admin/carpool/cars/1/members", bytes.NewBufferString(`{"reference":"private-reference","note":"private-note"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	svc.Stop()
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	require.Len(t, repository.logs, 1)
+	require.Equal(t, "<credential-bearing body omitted>", repository.logs[0].RequestBody)
+	require.EqualValues(t, 77, *repository.logs[0].ActorUserID)
+}

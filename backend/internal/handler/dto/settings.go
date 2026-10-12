@@ -433,6 +433,11 @@ type PublicSettings struct {
 
 	SubscriptionEnabled bool `json:"subscription_enabled"`
 
+	CarpoolMainEnabled             bool `json:"carpool_main_enabled"`
+	CarpoolTestOrdersEnabled       bool `json:"carpool_test_orders_enabled"`
+	CarpoolManualEnrollmentEnabled bool `json:"carpool_manual_enrollment_enabled"`
+	CarpoolControlEnabled          bool `json:"carpool_control_enabled"`
+
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
 	PluginManagementEnabled bool `json:"plugin_management_enabled"`

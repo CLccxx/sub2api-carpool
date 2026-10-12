@@ -1,0 +1,7 @@
+{
+  "name": "carpool-phase0-lab",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node lab.mjs" },
+  "devDependencies": { "pg": "8.16.3", "playwright": "1.58.2" }
+}
